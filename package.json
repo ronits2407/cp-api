@@ -1,6 +1,6 @@
 {
   "name": "@ronits2407/cp-api",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "One unified, fault-tolerant SDK to fetch contests, profiles, problems, submissions, and analytics from all major competitive programming platforms.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -22,7 +22,8 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "check-apis": "tsx scripts/check-apis.ts"
   },
   "keywords": [
     "competitive-programming",
@@ -35,7 +36,6 @@
     "scraper",
     "api",
     "unified",
-    "rate-limit",
     "typescript"
   ],
   "author": "Ronit",
@@ -47,8 +47,7 @@
   },
   "dependencies": {
     "axios": "^1.18.1",
-    "cheerio": "^1.2.0",
-    "lru-cache": "^11.5.1"
+    "cheerio": "^1.2.0"
   },
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
