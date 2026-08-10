@@ -3,11 +3,14 @@
  * Official docs: https://codeforces.com/apiHelp
  */
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { cachedFetch } from '../cache';
 import { getConfig } from '../config';
 import { UnifiedContest } from '../types';
+import { ProblemContent, sanitizeProblemHtml } from '../problemContent';
 
 const CF_API_BASE = 'https://codeforces.com/api';
+const CF_MAIN = 'https://codeforces.com';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -144,6 +147,66 @@ export interface CFSubmissionFilters {
   verdict?: 'OK' | 'WRONG_ANSWER' | 'TIME_LIMIT_EXCEEDED' | 'RUNTIME_ERROR' | 'COMPILATION_ERROR' | string;
   from?: number;
   count?: number;
+}
+
+function cleanPre($: cheerio.CheerioAPI, element: cheerio.Cheerio<any>): string {
+  const lines = element.children('.test-example-line');
+  if (lines.length) {
+    return lines.map((_, line) => $(line).text()).get().join('\n');
+  }
+
+  const clone = element.clone();
+  clone.find('br').replaceWith('\n');
+  return clone.text().replace(/\r/g, '').replace(/\n$/, '');
+}
+
+function sectionHtml($: cheerio.CheerioAPI, selector: string): string {
+  const section = $(selector).first().clone();
+  section.find('.section-title').first().remove();
+  return section.html()?.trim() ?? '';
+}
+
+function parseDurationMs(value: string): number | undefined {
+  const match = value.match(/([\d.]+)\s*(second|millisecond)/i);
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  return match[2].toLowerCase().startsWith('milli') ? amount : amount * 1000;
+}
+
+function parseMemoryMb(value: string): number | undefined {
+  const match = value.match(/([\d.]+)\s*(megabyte|mb|kilobyte|kb)/i);
+  if (!match) return undefined;
+  const amount = Number(match[1]);
+  return match[2].toLowerCase().startsWith('k') ? amount / 1024 : amount;
+}
+
+/** Parse a Codeforces problem page into normalized public problem content. */
+export function parseCodeforcesProblemContent(
+  html: string,
+  contestId: number,
+  index: string,
+  sourceUrl: string,
+): ProblemContent {
+  const $ = cheerio.load(html);
+  const root = $('.problem-statement').first();
+  if (!root.length) throw new Error('Codeforces problem statement was not found');
+  const statement = root.children('div').not('.header, .input-specification, .output-specification, .sample-tests, .note').first();
+  const samples = root.find('.sample-test').map((_, sample) => ({
+    input: cleanPre($, $(sample).find('.input pre').first()),
+    output: cleanPre($, $(sample).find('.output pre').first()),
+  })).get();
+  return {
+    platform: 'CODEFORCES', contestId: String(contestId), problemId: index.toUpperCase(),
+    title: root.find('.header .title').first().text().trim(),
+    statementHtml: sanitizeProblemHtml(statement.html()?.trim() ?? '', sourceUrl),
+    inputSpecificationHtml: sanitizeProblemHtml(sectionHtml($, '.problem-statement .input-specification'), sourceUrl),
+    outputSpecificationHtml: sanitizeProblemHtml(sectionHtml($, '.problem-statement .output-specification'), sourceUrl),
+    notesHtml: sanitizeProblemHtml(sectionHtml($, '.problem-statement .note'), sourceUrl) || undefined,
+    samples,
+    timeLimitMs: parseDurationMs(root.find('.time-limit').first().text()),
+    memoryLimitMb: parseMemoryMb(root.find('.memory-limit').first().text()),
+    sourceUrl,
+  };
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -380,6 +443,17 @@ export class Codeforces {
   async getProblem(contestId: number, index: string): Promise<CFProblem | null> {
     const problems = await this.getProblems();
     return problems.find(p => p.contestId === contestId && p.index.toLowerCase() === index.toLowerCase()) ?? null;
+  }
+
+  /** Fetch and parse the public statement and sample tests from Codeforces. */
+  async getProblemContent(contestId: number, index: string): Promise<ProblemContent> {
+    const normalizedIndex = index.toUpperCase();
+    const sourceUrl = `${CF_MAIN}/contest/${contestId}/problem/${encodeURIComponent(normalizedIndex)}?locale=en`;
+    return cachedFetch(`cf:problem-content:${contestId}:${normalizedIndex}`, async () => {
+      const { http } = getConfig();
+      const { data: html } = await axios.get(sourceUrl, { timeout: http.timeout, responseType: 'text', headers: { 'User-Agent': http.userAgent } });
+      return parseCodeforcesProblemContent(html, contestId, normalizedIndex, sourceUrl);
+    }, 3_600_000);
   }
 
   /**

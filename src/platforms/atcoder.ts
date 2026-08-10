@@ -4,9 +4,11 @@
  * and direct AtCoder scraping where needed.
  */
 import axios from 'axios';
+import * as cheerio from 'cheerio';
 import { cachedFetch } from '../cache';
 import { getConfig } from '../config';
 import { UnifiedContest } from '../types';
+import { ProblemContent, sanitizeProblemHtml } from '../problemContent';
 
 const AC_API = 'https://kenkoooo.com/atcoder';
 const AC_MAIN = 'https://atcoder.jp';
@@ -76,6 +78,64 @@ export interface ACProblemFilters {
 export interface ACSubmissionFilters {
   fromSecond?: number;
   verdict?: string; // 'AC', 'WA', 'TLE', etc.
+}
+
+/** Parse an AtCoder task page into normalized public problem content. */
+export function parseAtCoderProblemContent(
+  html: string,
+  contestId: string,
+  problemId: string,
+  sourceUrl: string,
+): ProblemContent {
+  const $ = cheerio.load(html);
+  const root = $('#task-statement .lang-en').first().length
+    ? $('#task-statement .lang-en').first()
+    : $('#task-statement').first();
+  if (!root.length) throw new Error('AtCoder problem statement was not found');
+
+  const sections = root.find('.part > section');
+  const findSection = (pattern: RegExp) => sections
+    .filter((_, section) => pattern.test($(section).find('h3').first().text().trim()))
+    .first();
+  const contentOf = (section: cheerio.Cheerio<any>): string => {
+    const clone = section.clone();
+    clone.find('h3').first().remove();
+    return clone.html()?.trim() ?? '';
+  };
+  const sampleInputs = sections.filter((_, section) =>
+    /^Sample Input\s*\d*/i.test($(section).find('h3').first().text().trim())
+  );
+  const samples = sampleInputs.map((_, section) => {
+    const number = $(section).find('h3').first().text().trim().match(/(\d+)\s*$/)?.[1];
+    const output = findSection(new RegExp(`^Sample Output\\s*${number ?? ''}$`, 'i'));
+    return {
+      input: $(section).find('pre').first().text().replace(/\r/g, '').replace(/\n$/, ''),
+      output: output.find('pre').first().text().replace(/\r/g, '').replace(/\n$/, ''),
+    };
+  }).get();
+  const titleText = $('span.h2').first().clone().children().remove().end().text().trim();
+  const timeText = $('body').text();
+
+  return {
+    platform: 'ATCODER',
+    contestId,
+    problemId,
+    title: titleText.replace(/^[A-Z0-9]+\s*-\s*/i, '') || problemId,
+    statementHtml: sanitizeProblemHtml(contentOf(findSection(/^Problem Statement$/i)), sourceUrl),
+    inputSpecificationHtml: sanitizeProblemHtml(contentOf(findSection(/^Input$/i)), sourceUrl),
+    outputSpecificationHtml: sanitizeProblemHtml(contentOf(findSection(/^Output$/i)), sourceUrl),
+    constraintsHtml: sanitizeProblemHtml(contentOf(findSection(/^Constraints$/i)), sourceUrl) || undefined,
+    samples,
+    timeLimitMs: (() => {
+      const match = timeText.match(/Time Limit:\s*([\d.]+)\s*sec/i);
+      return match ? Number(match[1]) * 1000 : undefined;
+    })(),
+    memoryLimitMb: (() => {
+      const match = timeText.match(/Memory Limit:\s*([\d.]+)\s*MiB/i);
+      return match ? Number(match[1]) : undefined;
+    })(),
+    sourceUrl,
+  };
 }
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -302,6 +362,20 @@ export class AtCoder {
     const p = problems.find(p => p.id === problemId);
     if (!p) return null;
     return { ...p, difficulty: difficulties[problemId]?.difficulty !== undefined ? Math.round(difficulties[problemId].difficulty!) : undefined };
+  }
+
+  /** Fetch and parse the English public statement and sample tests from AtCoder. */
+  async getProblemContent(contestId: string, problemId: string): Promise<ProblemContent> {
+    const sourceUrl = `${AC_MAIN}/contests/${encodeURIComponent(contestId)}/tasks/${encodeURIComponent(problemId)}?lang=en`;
+    return cachedFetch(`ac:problem-content:${contestId}:${problemId}`, async () => {
+      const { http } = getConfig();
+      const { data: html } = await axios.get(sourceUrl, {
+        timeout: http.timeout,
+        responseType: 'text',
+        headers: { 'User-Agent': http.userAgent },
+      });
+      return parseAtCoderProblemContent(html, contestId, problemId, sourceUrl);
+    }, 3_600_000);
   }
 
   /**

@@ -64,6 +64,7 @@ import { HttpClient }                                   from './utils/httpClient
 
 // ─── Public Type Re-exports ───────────────────────────────────────────────────
 export * from './types';
+export type { ProblemContent, ProblemContentPlatform, ProblemSample } from './problemContent';
 
 // Platform types
 export type { CFUserInfo, CFSubmission, CFProblem, CFContest, CFRatingChange,
