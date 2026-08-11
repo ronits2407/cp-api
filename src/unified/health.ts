@@ -1,30 +1,29 @@
-import { getPlatformHttpClient } from "../utils/platformHttpClient";
+import { getConfig } from "../config";
+import type { HealthPlatform, HealthResult } from "../types";
+import { HttpClient } from "../utils/httpClient";
+import { parseProxy } from "../utils/platformHttpClient";
 
 // TYPES
 
 /** The set of platforms that the Health checker understands */
-export type HealthPlatform = "CODEFORCES" | "ATCODER" | "CODECHEF" | "LEETCODE";
-
-/**
- * The result of a single platform connectivity check
- */
-export type HealthResult = {
-  /** Canonical platform identifier */
-  platform: HealthPlatform;
-  /** `true` when the platform responded within the timeout with a valid HTTP status */
-  reachable: boolean;
-  /** Round-trip time in milliseconds, measured from request start to response receipt */
-  latencyMs: number;
-  /** UTC timestamp of when this check was performed */
-  timestamp: Date;
-  /** Human-readable error message when `reachable` is `false` */
-  error?: string;
-};
+export type { HealthPlatform, HealthResult } from "../types";
 
 // CONFIG
 
 /** Maximum time (ms) to wait for any single platform health check */
 const HEALTH_TIMEOUT_MS = 8_000;
+
+function healthClient(platform: string): HttpClient {
+  const http = getConfig().http;
+  return new HttpClient({
+    platform,
+    timeout: Math.min(http.timeout, HEALTH_TIMEOUT_MS),
+    maxRetries: 0,
+    retryDelay: http.retryDelay,
+    userAgent: http.userAgent,
+    proxy: parseProxy(http.proxy),
+  });
+}
 
 // PER-PLATFORM CHECK
 
@@ -39,8 +38,8 @@ async function checkCodeforces(): Promise<HealthResult> {
   const start = Date.now();
 
   try {
-    const data = await getPlatformHttpClient("codeforces").get<any>(
-      "https://codeforces.com/api/contest.list?gym=false",
+    const data = await healthClient("codeforces").get<any>(
+      "https://codeforces.com/api/user.info?handles=tourist",
       undefined,
       { "Cache-Control": "no-cache" },
       { timeout: HEALTH_TIMEOUT_MS },
@@ -83,15 +82,13 @@ async function checkAtCoder(): Promise<HealthResult> {
   const start = Date.now();
 
   try {
-    await getPlatformHttpClient("atcoder").get(
-      "https://kenkoooo.com/atcoder/resources/problems.json",
-      undefined,
-      { Range: "bytes=0-10" },
-      {
-        timeout: HEALTH_TIMEOUT_MS,
-        validateStatus: (status) => status >= 200 && status < 300,
-      },
+    const data = await healthClient("atcoder").get<unknown>(
+      "https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions",
+      { user: "tourist", from_second: Math.floor(Date.now() / 1000) },
     );
+
+    if (!Array.isArray(data))
+      throw new Error("Unexpected submissions response");
 
     return {
       platform: "ATCODER",
@@ -122,7 +119,7 @@ async function checkCodeChef(): Promise<HealthResult> {
   const start = Date.now();
 
   try {
-    const data = await getPlatformHttpClient("codechef").get<any>(
+    const data = await healthClient("codechef").get<any>(
       "https://www.codechef.com/api/list/contests/all",
       undefined,
       { "Cache-Control": "no-cache" },
@@ -166,7 +163,7 @@ async function checkLeetCode(): Promise<HealthResult> {
   const start = Date.now();
 
   try {
-    const response = await getPlatformHttpClient("leetcode").post<{
+    const response = await healthClient("leetcode").post<{
       data?: unknown;
     }>(
       "https://leetcode.com/graphql",

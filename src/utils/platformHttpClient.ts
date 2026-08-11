@@ -58,6 +58,7 @@ function createClient(platform: HttpPlatform): ClientEntry {
   const limiter =
     config.rateLimit.enabled && platformLimit?.requestsPerSecond
       ? new RateLimiter({
+          platform,
           requestsPerSecond: platformLimit.requestsPerSecond,
           burst: platformLimit.burst,
           strategy: config.rateLimit.strategy,
@@ -70,15 +71,33 @@ function createClient(platform: HttpPlatform): ClientEntry {
     signature,
     limiter,
     client: new HttpClient({
+      platform,
       timeout: config.http.timeout,
       maxRetries: config.http.maxRetries,
       retryDelay: config.http.retryDelay,
       userAgent: config.http.userAgent,
+      proxy: parseProxy(config.http.proxy),
       rateLimiter: limiter,
     }),
   };
   clients.set(platform, entry);
   return entry;
+}
+
+export function parseProxy(proxy?: string) {
+  if (!proxy) return undefined;
+  const url = new URL(proxy);
+  return {
+    protocol: url.protocol.slice(0, -1),
+    host: url.hostname,
+    port: url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80,
+    auth: url.username
+      ? {
+          username: decodeURIComponent(url.username),
+          password: decodeURIComponent(url.password),
+        }
+      : undefined,
+  };
 }
 
 /**
@@ -92,7 +111,7 @@ export function getPlatformHttpClient(platform: HttpPlatform): HttpClient {
 
 /**
  * Destroy all limiter timers and clear the client registry
- * Primarily useful when resetting long-lived applications or isolated tests.
+ * @internal Primarily used by CP-API reset handling and isolated tests.
  */
 export function resetPlatformHttpClients(): void {
   for (const entry of clients.values()) entry.limiter?.destroy();

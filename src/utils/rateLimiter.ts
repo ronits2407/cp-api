@@ -4,13 +4,15 @@
  *
  * Supports two strategies:
  *  - `token-bucket`  (default): Tokens accumulate continuously up to `burst` capacity.
- *  - `fixed-window`: The bucket is fully refilled at the start of every 1-second window.
+ *  - `fixed-window`: The full burst allowance resets at each fixed window.
  *
  * When no token is available the limiter can:
  *  - `wait`  (default): Queue the caller and resolve as soon as a token is granted.
  *  - `throw`:           Immediately (or after maxWaitMs) throw a RateLimitError.
  *  - `skip`:            Resolve immediately without consuming a token (fire-and-forget callers).
  */
+
+import { emitEvent } from "./events";
 
 // ERROR
 
@@ -67,6 +69,8 @@ export interface RateLimiterConfig {
    * When omitted, callers with `onRateLimit === 'wait'` wait indefinitely.
    */
   maxWaitMs?: number;
+  /** Platform name used for lifecycle events */
+  platform?: string;
 }
 
 /** Snapshot of the limiter's current state */
@@ -97,6 +101,8 @@ export class RateLimiter {
   private readonly strategy: RateLimiterStrategy;
   private readonly action: RateLimitAction;
   private readonly maxWaitMs: number | undefined;
+  private readonly platform: string;
+  private readonly fixedWindowMs: number;
 
   // State
   /** Current token count (fractional in token-bucket mode) */
@@ -110,6 +116,7 @@ export class RateLimiter {
     resolve: () => void;
     reject: (err: RateLimitError) => void;
     enqueuedAt: number;
+    timeout?: ReturnType<typeof setTimeout>;
   }> = [];
 
   /** Timer handle used to drive queue processing */
@@ -121,12 +128,23 @@ export class RateLimiter {
         "RateLimiter: requestsPerSecond must be a positive number.",
       );
     }
+    if ((config.burst ?? config.requestsPerSecond) < 1) {
+      throw new Error("RateLimiter: burst must be at least 1.");
+    }
+    if (
+      config.maxWaitMs !== undefined &&
+      (!Number.isFinite(config.maxWaitMs) || config.maxWaitMs < 0)
+    ) {
+      throw new Error("RateLimiter: maxWaitMs must be non-negative.");
+    }
 
     this.rps = config.requestsPerSecond;
     this.burst = config.burst ?? config.requestsPerSecond;
     this.strategy = config.strategy ?? "token-bucket";
     this.action = config.onRateLimit ?? "wait";
     this.maxWaitMs = config.maxWaitMs;
+    this.platform = config.platform ?? "unknown";
+    this.fixedWindowMs = (this.burst / this.rps) * 1000;
 
     // Start with a full bucket
     this.tokens = this.burst;
@@ -153,10 +171,12 @@ export class RateLimiter {
     // Opportunistically refill before checking
     this._refill();
 
-    if (this.tokens >= 1) {
+    if (this.tokens >= 1 && this.waitQueue.length === 0) {
       this.tokens -= 1;
       return;
     }
+
+    emitEvent("rateLimit:hit", { platform: this.platform });
 
     // No token available - apply the configured action
     switch (this.action) {
@@ -171,6 +191,7 @@ export class RateLimiter {
 
       case "wait":
       default:
+        emitEvent("rateLimit:wait", { platform: this.platform });
         return this._enqueue();
     }
   }
@@ -185,10 +206,15 @@ export class RateLimiter {
     let nextRefillMs = 0;
 
     if (tokens < 1) {
-      // How many ms until one more token arrives?
-      const msPerToken = 1000 / this.rps;
-      const deficit = 1 - tokens;
-      nextRefillMs = Math.ceil(deficit * msPerToken);
+      if (this.strategy === "fixed-window") {
+        nextRefillMs = Math.ceil(
+          this.fixedWindowMs - (Date.now() - this.lastRefillTime),
+        );
+      } else {
+        const msPerToken = 1000 / this.rps;
+        const deficit = 1 - tokens;
+        nextRefillMs = Math.ceil(deficit * msPerToken);
+      }
     }
 
     return { tokens: Math.max(0, tokens), nextRefillMs };
@@ -207,6 +233,7 @@ export class RateLimiter {
     // Reject all waiting callers.
     const err = new RateLimitError("RateLimiter was destroyed.", 0);
     for (const waiter of this.waitQueue.splice(0)) {
+      if (waiter.timeout) clearTimeout(waiter.timeout);
       waiter.reject(err);
     }
   }
@@ -218,7 +245,7 @@ export class RateLimiter {
    *
    * - **token-bucket**: Continuously adds `rps * elapsedSeconds` tokens,
    *   capped at `burst`.
-   * - **fixed-window**: Fully refills the bucket once per second.
+   * - **fixed-window**: Resets the full burst allowance every `burst / rps` seconds.
    */
   private _refill(): void {
     const now = Date.now();
@@ -226,10 +253,9 @@ export class RateLimiter {
 
     if (this.strategy === "fixed-window") {
       // Refill if a full second has passed since the last window
-      if (elapsed >= 1000) {
-        const windows = Math.floor(elapsed / 1000);
-        this.tokens = Math.min(this.burst, this.tokens + windows * this.rps);
-        this.lastRefillTime = now - (elapsed % 1000);
+      if (elapsed >= this.fixedWindowMs) {
+        this.tokens = this.burst;
+        this.lastRefillTime = now - (elapsed % this.fixedWindowMs);
       }
     } else {
       // token-bucket: proportional refill
@@ -244,7 +270,10 @@ export class RateLimiter {
    * The interval runs at 4x the token refill rate for smoother draining.
    */
   private _startRefillLoop(): void {
-    const intervalMs = Math.max(10, Math.floor(1000 / (this.rps * 4)));
+    const intervalMs = Math.min(
+      100,
+      Math.max(10, Math.floor(1000 / (this.rps * 4))),
+    );
 
     this.refillTimer = setInterval(() => {
       this._refill();
@@ -271,6 +300,7 @@ export class RateLimiter {
       // Check timeout for 'wait' mode callers with maxWaitMs set.
       if (this.maxWaitMs !== undefined && waited >= this.maxWaitMs) {
         this.waitQueue.shift();
+        if (waiter.timeout) clearTimeout(waiter.timeout);
         waiter.reject(
           new RateLimitError(
             `Rate limit: caller waited ${waited}ms, exceeding maxWaitMs of ${this.maxWaitMs}ms.`,
@@ -283,6 +313,7 @@ export class RateLimiter {
       // Grant the token.
       this.tokens -= 1;
       this.waitQueue.shift();
+      if (waiter.timeout) clearTimeout(waiter.timeout);
       waiter.resolve();
     }
 
@@ -294,6 +325,7 @@ export class RateLimiter {
         const waited = now - waiter.enqueuedAt;
         if (waited >= this.maxWaitMs) {
           this.waitQueue.splice(i, 1);
+          if (waiter.timeout) clearTimeout(waiter.timeout);
           waiter.reject(
             new RateLimitError(
               `Rate limit: caller waited ${waited}ms, exceeding maxWaitMs of ${this.maxWaitMs}ms.`,
@@ -313,7 +345,28 @@ export class RateLimiter {
    */
   private _enqueue(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.waitQueue.push({ resolve, reject, enqueuedAt: Date.now() });
+      const waiter: (typeof this.waitQueue)[number] = {
+        resolve,
+        reject,
+        enqueuedAt: Date.now(),
+      };
+      if (this.maxWaitMs !== undefined) {
+        waiter.timeout = setTimeout(() => {
+          const index = this.waitQueue.indexOf(waiter);
+          if (index === -1) return;
+          this.waitQueue.splice(index, 1);
+          const waited = Date.now() - waiter.enqueuedAt;
+          reject(
+            new RateLimitError(
+              `Rate limit: caller waited ${waited}ms, exceeding maxWaitMs of ${this.maxWaitMs}ms.`,
+              waited,
+            ),
+          );
+        }, this.maxWaitMs);
+        if ((waiter.timeout as NodeJS.Timeout).unref)
+          (waiter.timeout as NodeJS.Timeout).unref();
+      }
+      this.waitQueue.push(waiter);
     });
   }
 }

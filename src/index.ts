@@ -55,12 +55,28 @@ import { Health } from "./unified/health";
 
 // CONFIG
 import { configure, getConfig, resetConfig } from "./config";
+export { defaultConfig } from "./config";
 
 // UTILITIES
 import { clearCache, invalidate, getCacheSize } from "./cache";
 import { onEvent, offEvent } from "./utils/events";
+export { cpEvents, emitEvent } from "./utils/events";
 export { RateLimiter, RateLimitError } from "./utils/rateLimiter";
+export type {
+  RateLimiterConfig,
+  RateLimiterStatus,
+  RateLimiterStrategy,
+  RateLimitAction,
+} from "./utils/rateLimiter";
 export { HttpClient } from "./utils/httpClient";
+export type { HttpClientConfig } from "./utils/httpClient";
+export type {
+  CPEventListener,
+  CPEventMap,
+  CPEventName,
+  CPEventPayload,
+} from "./utils/events";
+import { resetPlatformHttpClients } from "./utils/platformHttpClient";
 
 // TYPES
 export * from "./types";
@@ -69,6 +85,7 @@ export type {
   ProblemContentPlatform,
   ProblemSample,
 } from "./problemContent";
+export { ProblemContentAccessError } from "./problemContent";
 
 // Platform types
 export type {
@@ -113,7 +130,11 @@ class CP {
   // Config management
   public configure = configure;
   public getConfig = getConfig;
-  public resetConfig = resetConfig;
+  public resetConfig(): void {
+    resetConfig();
+    resetPlatformHttpClients();
+    clearCache();
+  }
 
   // Cache management
   public clearCache = clearCache;

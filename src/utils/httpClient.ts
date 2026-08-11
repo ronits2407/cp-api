@@ -17,6 +17,8 @@ import axios, {
   AxiosProxyConfig,
 } from "axios";
 import { RateLimiter } from "./rateLimiter";
+import { emitEvent } from "./events";
+import { log } from "./logger";
 
 // TYPES
 
@@ -58,10 +60,12 @@ export interface HttpClientConfig {
    * When provided, `acquire()` is called before every request attempt
    */
   rateLimiter?: RateLimiter;
+  /** Platform name used in events and logs */
+  platform?: string;
 }
 
 /** HTTP status codes that trigger an automatic retry */
-const RETRYABLE_STATUS_CODES = new Set([429, 503]);
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503, 504]);
 
 // HELPERS
 
@@ -91,6 +95,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function retryAfterMs(error: AxiosError): number | undefined {
+  const value = error.response?.headers?.["retry-after"];
+  if (typeof value === "number") return Math.max(0, value * 1000);
+  if (typeof value !== "string") return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
 // HttpClient
 
 /**
@@ -110,6 +124,7 @@ export class HttpClient {
   private readonly maxRetries: number;
   private readonly retryDelay: number;
   private readonly rateLimiter: RateLimiter | undefined;
+  private readonly platform: string;
 
   constructor(config: HttpClientConfig = {}) {
     const {
@@ -119,11 +134,13 @@ export class HttpClient {
       userAgent = "cp-api/1.0",
       proxy,
       rateLimiter,
+      platform = "unknown",
     } = config;
 
     this.maxRetries = maxRetries;
     this.retryDelay = retryDelay;
     this.rateLimiter = rateLimiter;
+    this.platform = platform;
 
     // Build a shared axios instance with sensible defaults
     this.axiosInstance = axios.create({
@@ -169,6 +186,14 @@ export class HttpClient {
     });
   }
 
+  /** Perform a GET when only Axios request options are needed */
+  public async getWithOptions<T>(
+    url: string,
+    options: Omit<AxiosRequestConfig, "method" | "url" | "params" | "headers">,
+  ): Promise<T> {
+    return this._request<T>({ ...options, method: "GET", url });
+  }
+
   /**
    * Perform a POST request and return the typed response body
    *
@@ -203,6 +228,9 @@ export class HttpClient {
    */
   private async _request<T>(config: AxiosRequestConfig): Promise<T> {
     let attempt = 0;
+    const startedAt = Date.now();
+    const url = String(config.url ?? "");
+    emitEvent("fetch:start", { platform: this.platform, url, attempt: 0 });
 
     while (true) {
       // Acquire a rate-limiter token before every attempt (including retries)
@@ -212,27 +240,53 @@ export class HttpClient {
 
       try {
         const response = await this.axiosInstance.request<T>(config);
+        emitEvent("fetch:success", {
+          platform: this.platform,
+          url,
+          attempt,
+          durationMs: Date.now() - startedAt,
+        });
         return response.data;
       } catch (err) {
         const axiosErr = err as AxiosError;
 
         // Non-retryable errors - bubble up immediately
         if (!axios.isAxiosError(axiosErr) || !isRetryable(axiosErr)) {
+          const error =
+            axiosErr instanceof Error ? axiosErr : new Error(String(err));
+          emitEvent("fetch:error", {
+            platform: this.platform,
+            url,
+            attempt,
+            durationMs: Date.now() - startedAt,
+            error,
+          });
           throw axiosErr;
         }
 
         // We've exhausted our retry budget
         if (attempt >= this.maxRetries) {
+          emitEvent("fetch:error", {
+            platform: this.platform,
+            url,
+            attempt,
+            durationMs: Date.now() - startedAt,
+            error: axiosErr,
+          });
           throw axiosErr;
         }
 
-        const delay = computeBackoff(this.retryDelay, attempt);
+        const delay =
+          retryAfterMs(axiosErr) ?? computeBackoff(this.retryDelay, attempt);
         const status = axiosErr.response?.status ?? "network error";
-
-        console.warn(
-          `[HttpClient] Retryable error (status: ${status}) on ${config.method} ${config.url}. ` +
-            `Attempt ${attempt + 1}/${this.maxRetries}. Retrying in ${delay}ms...`,
-        );
+        log("warn", "Retrying platform request", {
+          platform: this.platform,
+          method: config.method,
+          status,
+          attempt: attempt + 1,
+          maxRetries: this.maxRetries,
+          delayMs: delay,
+        });
 
         await sleep(delay);
         attempt++;

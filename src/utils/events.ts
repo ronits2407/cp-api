@@ -19,6 +19,7 @@
  */
 
 import { EventEmitter } from "events";
+import { getConfig } from "../config";
 
 // Event PAYLOAD
 
@@ -40,6 +41,10 @@ export interface CPEventPayload {
 
   /** The error that occurred, for error events */
   error?: Error;
+  key?: string;
+  attempt?: number;
+  delayMs?: number;
+  waitedMs?: number;
 }
 
 // Event MAP
@@ -153,5 +158,6 @@ export function emitEvent<E extends CPEventName>(
   event: E,
   payload: CPEventMap[E],
 ): void {
+  if (!getConfig().events.enabled) return;
   cpEvents.emit(event, payload);
 }

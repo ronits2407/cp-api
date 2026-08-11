@@ -80,7 +80,7 @@ export interface CacheConfig {
   /** Default TTL for cached items in ms (default: 300000 = 5 min) */
   ttlMs: number;
   /** Max number of items in the LRU cache (default: 500) */
-  maxSize?: number;
+  maxSize: number;
 }
 
 // Events & Logging
@@ -157,8 +157,10 @@ export interface UnifiedUser {
 
 // Analytics
 
+export type HealthPlatform = "CODEFORCES" | "ATCODER" | "CODECHEF" | "LEETCODE";
+
 export interface HealthResult {
-  platform: string;
+  platform: HealthPlatform;
   reachable: boolean;
   latencyMs: number;
   timestamp: Date;

@@ -24,6 +24,26 @@ export interface ProblemContent {
   sourceUrl: string;
 }
 
+export class ProblemContentAccessError extends Error {
+  constructor(public readonly platform: ProblemContentPlatform) {
+    super(
+      `${platform} blocked the problem page request with a browser verification challenge`,
+    );
+    this.name = "ProblemContentAccessError";
+  }
+}
+
+export function assertProblemPageAccessible(
+  html: string,
+  platform: ProblemContentPlatform,
+): void {
+  if (
+    /<title>\s*(just a moment|attention required)/i.test(html) ||
+    /cf-chl-|challenge-platform|verify you are human/i.test(html)
+  )
+    throw new ProblemContentAccessError(platform);
+}
+
 /** Remove active content while preserving the markup needed for formulas and prose */
 export function sanitizeProblemHtml(html: string, baseUrl: string): string {
   const $ = cheerio.load(html, null, false);
@@ -40,6 +60,11 @@ export function sanitizeProblemHtml(html: string, baseUrl: string): string {
     for (const attribute of ["src", "href"]) {
       const value = $(element).attr(attribute);
       if (!value || value.startsWith("#")) continue;
+      if (
+        attribute === "src" &&
+        /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value)
+      )
+        continue;
       try {
         const resolved = new URL(value, baseUrl);
         if (!["http:", "https:"].includes(resolved.protocol))

@@ -6,8 +6,13 @@
 import * as cheerio from "cheerio";
 import { cachedFetch } from "../cache";
 import { UnifiedContest } from "../types";
-import { ProblemContent, sanitizeProblemHtml } from "../problemContent";
+import {
+  assertProblemPageAccessible,
+  ProblemContent,
+  sanitizeProblemHtml,
+} from "../problemContent";
 import { getPlatformHttpClient } from "../utils/platformHttpClient";
+import { Health } from "../unified/health";
 
 const AC_API = "https://kenkoooo.com/atcoder";
 const AC_MAIN = "https://atcoder.jp";
@@ -79,6 +84,8 @@ export interface ACSubmissionFilters {
   verdict?: string; // 'AC', 'WA', 'TLE', etc.
 }
 
+const AC_SUBMISSIONS_PAGE_SIZE = 500;
+
 /** Parse a task page into normalized public problem content */
 export function parseAtCoderProblemContent(
   html: string,
@@ -86,6 +93,7 @@ export function parseAtCoderProblemContent(
   problemId: string,
   sourceUrl: string,
 ): ProblemContent {
+  assertProblemPageAccessible(html, "ATCODER");
   const $ = cheerio.load(html);
   const root = $("#task-statement .lang-en").first().length
     ? $("#task-statement .lang-en").first()
@@ -172,7 +180,7 @@ export function parseAtCoderProblemContent(
       return match ? Number(match[1]) * 1000 : undefined;
     })(),
     memoryLimitMb: (() => {
-      const match = timeText.match(/Memory Limit:\s*([\d.]+)\s*MiB/i);
+      const match = timeText.match(/Memory Limit:\s*([\d.]+)\s*(?:MiB|MB)/i);
       return match ? Number(match[1]) : undefined;
     })(),
     sourceUrl,
@@ -244,21 +252,17 @@ export class AtCoder {
    */
   async getUser(handle: string): Promise<ACUserInfo | null> {
     return cachedFetch(`ac:user:${handle}`, async () => {
-      try {
-        const history = await this.getUserRatingHistory(handle);
-        if (!history.length) return null;
-        const latest = history[history.length - 1];
-        const highestRating = Math.max(...history.map((h) => h.NewRating));
-        return {
-          user_id: handle,
-          rating: latest.NewRating ?? 0,
-          highest_rating: highestRating,
-          affiliation: "",
-          rank: 0,
-        };
-      } catch {
-        return null;
-      }
+      const history = await this.getUserRatingHistory(handle);
+      if (!history.length) return null;
+      const latest = history[history.length - 1];
+      const highestRating = Math.max(...history.map((h) => h.NewRating));
+      return {
+        user_id: handle,
+        rating: latest.NewRating ?? 0,
+        highest_rating: highestRating,
+        affiliation: "",
+        rank: 0,
+      };
     });
   }
 
@@ -266,14 +270,10 @@ export class AtCoder {
    * Fetch the full rating history for a user (all rated contests)
    */
   async getUserRatingHistory(handle: string): Promise<ACRatingHistoryEntry[]> {
-    try {
-      const data = await getPlatformHttpClient("atcoder").get<
-        ACRatingHistoryEntry[]
-      >(`${AC_MAIN}/users/${encodeURIComponent(handle)}/history/json`);
-      return Array.isArray(data) ? data : [];
-    } catch {
-      return [];
-    }
+    const data = await getPlatformHttpClient("atcoder").get<
+      ACRatingHistoryEntry[]
+    >(`${AC_MAIN}/users/${encodeURIComponent(handle)}/history/json`);
+    return Array.isArray(data) ? data : [];
   }
 
   /**
@@ -284,11 +284,28 @@ export class AtCoder {
     handle: string,
     filters: ACSubmissionFilters = {},
   ): Promise<ACSubmission[]> {
-    const data = await getPlatformHttpClient("atcoder").get<ACSubmission[]>(
-      `${AC_API}/atcoder-api/v3/user/submissions`,
-      { user: handle.toLowerCase(), from_second: filters.fromSecond ?? 0 },
-    );
-    const results: ACSubmission[] = Array.isArray(data) ? data : [];
+    const results: ACSubmission[] = [];
+    const seen = new Set<number>();
+    let cursor = filters.fromSecond ?? 0;
+    while (true) {
+      const data = await getPlatformHttpClient("atcoder").get<ACSubmission[]>(
+        `${AC_API}/atcoder-api/v3/user/submissions`,
+        { user: handle.toLowerCase(), from_second: cursor },
+      );
+      const page = Array.isArray(data) ? data : [];
+      for (const submission of page) {
+        if (!seen.has(submission.id)) {
+          seen.add(submission.id);
+          results.push(submission);
+        }
+      }
+      if (page.length < AC_SUBMISSIONS_PAGE_SIZE) break;
+      const next =
+        Math.max(...page.map((submission) => submission.epoch_second)) + 1;
+      if (next <= cursor)
+        throw new Error("AtCoder submissions pagination did not advance");
+      cursor = next;
+    }
     if (filters.verdict)
       return results.filter((s) => s.result === filters.verdict);
     return results;
@@ -403,10 +420,10 @@ export class AtCoder {
    */
   async getUserAffiliation(handle: string): Promise<string | null> {
     try {
-      const html = await getPlatformHttpClient("atcoder").get<string>(
+      const html = await getPlatformHttpClient(
+        "atcoder",
+      ).getWithOptions<string>(
         `${AC_MAIN}/users/${encodeURIComponent(handle)}`,
-        undefined,
-        undefined,
         { responseType: "text" },
       );
       const m = html.match(
@@ -492,12 +509,9 @@ export class AtCoder {
     return cachedFetch(
       `ac:problem-content:${contestId}:${problemId}`,
       async () => {
-        const html = await getPlatformHttpClient("atcoder").get<string>(
-          sourceUrl,
-          undefined,
-          undefined,
-          { responseType: "text" },
-        );
+        const html = await getPlatformHttpClient(
+          "atcoder",
+        ).getWithOptions<string>(sourceUrl, { responseType: "text" });
         return parseAtCoderProblemContent(
           html,
           contestId,
@@ -543,10 +557,8 @@ export class AtCoder {
    * Fetch upcoming (and optionally ongoing) contests by scraping atcoder.jp
    */
   async getUpcomingContests(): Promise<UnifiedContest[]> {
-    const html = await getPlatformHttpClient("atcoder").get<string>(
+    const html = await getPlatformHttpClient("atcoder").getWithOptions<string>(
       "https://atcoder.jp/contests/?lang=en",
-      undefined,
-      undefined,
       { responseType: "text" },
     );
 
@@ -592,10 +604,8 @@ export class AtCoder {
   async getTopRatedUsers(
     count: number = 50,
   ): Promise<Array<{ handle: string; rating: number; country: string }>> {
-    const html = await getPlatformHttpClient("atcoder").get<string>(
+    const html = await getPlatformHttpClient("atcoder").getWithOptions<string>(
       `${AC_MAIN}/ranking?contestType=algo`,
-      undefined,
-      undefined,
       { responseType: "text" },
     );
     const results: Array<{ handle: string; rating: number; country: string }> =
@@ -621,16 +631,7 @@ export class AtCoder {
 
   /** Health check using Kenkoooo API */
   async isAPIReachable(): Promise<boolean> {
-    try {
-      await getPlatformHttpClient("atcoder").get(
-        `${AC_API}/resources/problems.json`,
-        undefined,
-        { Range: "bytes=0-100" },
-        { timeout: 8000 },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    const [result] = await new Health().check("ATCODER");
+    return result.reachable;
   }
 }

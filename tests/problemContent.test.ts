@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { parseCodeforcesProblemContent } from "../src/platforms/codeforces";
 import { parseAtCoderProblemContent } from "../src/platforms/atcoder";
-import { sanitizeProblemHtml } from "../src/problemContent";
+import {
+  ProblemContentAccessError,
+  sanitizeProblemHtml,
+} from "../src/problemContent";
 
 describe("problem content parsing", () => {
   it("normalizes a Codeforces statement and samples", () => {
@@ -36,7 +39,7 @@ describe("problem content parsing", () => {
   });
 
   it("selects English AtCoder content and pairs samples", () => {
-    const html = `<span class="h2">A - Example</span><div id="task-statement"><span class="lang-en"><div class="part"><section><h3>Problem Statement</h3><p>English</p><img src="/img/a.png"></section></div><div class="part"><section><h3>Constraints</h3><p>N &gt; 0</p></section></div><div class="part"><section><h3>Input</h3><pre>N</pre></section></div><div class="part"><section><h3>Output</h3><p>Answer</p></section></div><div class="part"><section><h3>Sample Input 1</h3><pre>1\n</pre></section></div><div class="part"><section><h3>Sample Output 1</h3><pre>Yes\n</pre></section></div></span></div>`;
+    const html = `<span class="h2">A - Example</span><div>Memory Limit: 512 MB</div><div id="task-statement"><span class="lang-en"><div class="part"><section><h3>Problem Statement</h3><p>English</p><img src="/img/a.png"></section></div><div class="part"><section><h3>Constraints</h3><p>N &gt; 0</p></section></div><div class="part"><section><h3>Input</h3><pre>N</pre></section></div><div class="part"><section><h3>Output</h3><p>Answer</p></section></div><div class="part"><section><h3>Sample Input 1</h3><pre>1\n</pre></section></div><div class="part"><section><h3>Sample Output 1</h3><pre>Yes\n</pre></section></div></span></div>`;
     const result = parseAtCoderProblemContent(
       html,
       "abc001",
@@ -48,10 +51,22 @@ describe("problem content parsing", () => {
       contestId: "abc001",
       problemId: "abc001_a",
       title: "Example",
+      memoryLimitMb: 512,
     });
     expect(result.statementHtml).toContain("https://atcoder.jp/img/a.png");
     expect(result.constraintsHtml).toContain("N &gt; 0");
     expect(result.samples).toEqual([{ input: "1", output: "Yes" }]);
+  });
+
+  it("reports browser verification pages explicitly", () => {
+    expect(() =>
+      parseCodeforcesProblemContent(
+        "<html><title>Just a moment...</title><div id='cf-chl-widget'></div></html>",
+        10,
+        "A",
+        "https://codeforces.com/contest/10/problem/A",
+      ),
+    ).toThrow(ProblemContentAccessError);
   });
 
   it("removes active content and unsafe URLs from returned HTML", () => {
@@ -62,5 +77,12 @@ describe("problem content parsing", () => {
     expect(result).not.toContain("script");
     expect(result).not.toContain("onclick");
     expect(result).not.toContain("javascript:");
+  });
+
+  it("keeps safe raster data images but strips SVG data URLs", () => {
+    const html = `<img src="data:image/png;base64,iVBORw0KGgo="><img src="data:image/svg+xml;base64,PHN2Zz4=">`;
+    const result = sanitizeProblemHtml(html, "https://example.com/tasks/a");
+    expect(result).toContain("data:image/png;base64,iVBORw0KGgo=");
+    expect(result).not.toContain("image/svg+xml");
   });
 });

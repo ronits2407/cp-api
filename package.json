@@ -1,7 +1,7 @@
 {
   "name": "@ronits2407/cp-api",
   "version": "1.0.8",
-  "description": "One unified, fault-tolerant SDK to fetch contests, profiles, problems, submissions, and analytics from all major competitive programming platforms.",
+  "description": "One unified, fault-tolerant SDK to fetch contests, profiles, problem content, submissions, and analytics from Codeforces, AtCoder, LeetCode, and CodeChef.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -28,6 +28,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "release:check": "npm run check && npm run build && npm pack --dry-run",
     "prepublishOnly": "npm run check && npm run build"
   },
   "keywords": [

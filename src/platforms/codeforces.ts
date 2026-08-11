@@ -5,8 +5,13 @@
 import * as cheerio from "cheerio";
 import { cachedFetch } from "../cache";
 import { UnifiedContest } from "../types";
-import { ProblemContent, sanitizeProblemHtml } from "../problemContent";
+import {
+  assertProblemPageAccessible,
+  ProblemContent,
+  sanitizeProblemHtml,
+} from "../problemContent";
 import { getPlatformHttpClient } from "../utils/platformHttpClient";
+import { Health } from "../unified/health";
 
 const CF_API_BASE = "https://codeforces.com/api";
 const CF_MAIN = "https://codeforces.com";
@@ -204,6 +209,7 @@ export function parseCodeforcesProblemContent(
   index: string,
   sourceUrl: string,
 ): ProblemContent {
+  assertProblemPageAccessible(html, "CODEFORCES");
   const $ = cheerio.load(html);
   const root = $(".problem-statement").first();
   if (!root.length)
@@ -508,18 +514,20 @@ export class Codeforces {
    * Result is cached for 1 hour.
    */
   async getProblems(filters: CFProblemFilters = {}): Promise<CFProblem[]> {
-    const params: Record<string, any> = {};
-    if (filters.tags?.length) params.tags = filters.tags.join(";");
     const result = await cachedFetch(
       "cf:problems",
       () =>
         cfGet<{ problems: CFProblem[]; problemStatistics: any[] }>(
           "problemset.problems",
-          params,
+          {},
         ).then((r) => r.problems),
       3600_000, // 1h
     );
     let filtered = result;
+    if (filters.tags?.length)
+      filtered = filtered.filter((p) =>
+        filters.tags!.every((tag) => p.tags?.includes(tag)),
+      );
     if (filters.minRating)
       filtered = filtered.filter((p) => (p.rating ?? 0) >= filters.minRating!);
     if (filters.maxRating)
@@ -554,12 +562,9 @@ export class Codeforces {
     return cachedFetch(
       `cf:problem-content:${contestId}:${normalizedIndex}`,
       async () => {
-        const html = await getPlatformHttpClient("codeforces").get<string>(
-          sourceUrl,
-          undefined,
-          undefined,
-          { responseType: "text" },
-        );
+        const html = await getPlatformHttpClient(
+          "codeforces",
+        ).getWithOptions<string>(sourceUrl, { responseType: "text" });
         return parseCodeforcesProblemContent(
           html,
           contestId,
@@ -611,7 +616,7 @@ export class Codeforces {
     opts: { phase?: string; gym?: boolean } = {},
   ): Promise<CFContest[]> {
     const all = await cachedFetch(
-      "cf:contests",
+      `cf:contests:gym:${Boolean(opts.gym)}`,
       () =>
         cfGet<CFContest[]>("contest.list", {
           gym: opts.gym ? "true" : "false",
@@ -654,13 +659,29 @@ export class Codeforces {
     contestId: number,
     opts: { from?: number; count?: number; handles?: string[] } = {},
   ): Promise<CFStandings> {
-    const params: Record<string, any> = {
-      contestId,
-      from: opts.from ?? 1,
-      count: opts.count ?? 100,
-    };
-    if (opts.handles?.length) params.handles = opts.handles.join(";");
-    return cfGet<CFStandings>("contest.standings", params);
+    const from = opts.from ?? 1;
+    const count = opts.count ?? 100;
+    if (!Number.isInteger(from) || from < 1)
+      throw new RangeError("from must be a positive integer");
+    if (!Number.isInteger(count) || count < 0)
+      throw new RangeError("count must be a non-negative integer");
+
+    const standings = await cachedFetch(
+      `cf:standings:${contestId}`,
+      () => cfGet<CFStandings>("contest.standings", { contestId }),
+      60_000,
+    );
+    const handles = new Set(
+      opts.handles?.map((handle) => handle.toLowerCase()),
+    );
+    const rows = handles.size
+      ? standings.rows.filter((row) =>
+          row.party.members.some((member) =>
+            handles.has(member.handle.toLowerCase()),
+          ),
+        )
+      : standings.rows;
+    return { ...standings, rows: rows.slice(from - 1, from - 1 + count) };
   }
 
   /**
@@ -676,7 +697,7 @@ export class Codeforces {
    * Fetch problems for a specific contest
    */
   async getContestProblems(contestId: number): Promise<CFProblem[]> {
-    const standings = await this.getContestStandings(contestId, { count: 1 });
+    const standings = await this.getContestStandings(contestId, { count: 0 });
     return standings.problems;
   }
 
@@ -741,16 +762,7 @@ export class Codeforces {
 
   /** Health check */
   async isAPIReachable(): Promise<boolean> {
-    try {
-      await getPlatformHttpClient("codeforces").get(
-        `${CF_API_BASE}/user.info?handles=tourist`,
-        undefined,
-        undefined,
-        { timeout: 5000 },
-      );
-      return true;
-    } catch {
-      return false;
-    }
+    const [result] = await new Health().check("CODEFORCES");
+    return result.reachable;
   }
 }

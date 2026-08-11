@@ -60,4 +60,11 @@ describe("Configuration", () => {
     // Others should remain at defaults
     expect(config.rateLimit.platforms?.atcoder?.requestsPerSecond).toBe(0.5);
   });
+
+  it("rejects invalid numeric and proxy configuration", () => {
+    expect(() => configure({ cache: { maxSize: 0 } })).toThrow(TypeError);
+    expect(() =>
+      configure({ http: { proxy: "socks://localhost:1080" } }),
+    ).toThrow(TypeError);
+  });
 });
