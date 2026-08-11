@@ -1,13 +1,13 @@
-import * as cheerio from 'cheerio';
+import * as cheerio from "cheerio";
 
-export type ProblemContentPlatform = 'CODEFORCES' | 'ATCODER';
+export type ProblemContentPlatform = "CODEFORCES" | "ATCODER";
 
 export interface ProblemSample {
   input: string;
   output: string;
 }
 
-/** Parsed, platform-neutral public content for a programming problem. */
+/** Parsed, platform-neutral public content for a programming problem */
 export interface ProblemContent {
   platform: ProblemContentPlatform;
   contestId: string;
@@ -24,26 +24,31 @@ export interface ProblemContent {
   sourceUrl: string;
 }
 
-/** Remove active content while preserving the markup needed for formulas and prose. */
+/** Remove active content while preserving the markup needed for formulas and prose */
 export function sanitizeProblemHtml(html: string, baseUrl: string): string {
   const $ = cheerio.load(html, null, false);
-  $('script, style, iframe, object, embed, form, input, button, textarea, select, meta, link').remove();
-  $('*').each((_, element) => {
+  $(
+    "script, style, iframe, object, embed, form, input, button, textarea, select, meta, link",
+  ).remove();
+  $("*").each((_, element) => {
     for (const attribute of Object.keys($(element).attr() ?? {})) {
       const lower = attribute.toLowerCase();
-      if (lower.startsWith('on') || lower === 'style' || lower === 'srcdoc') {
+      if (lower.startsWith("on") || lower === "style" || lower === "srcdoc") {
         $(element).removeAttr(attribute);
       }
     }
-    for (const attribute of ['src', 'href']) {
+    for (const attribute of ["src", "href"]) {
       const value = $(element).attr(attribute);
-      if (!value || value.startsWith('#')) continue;
+      if (!value || value.startsWith("#")) continue;
       try {
         const resolved = new URL(value, baseUrl);
-        if (!['http:', 'https:'].includes(resolved.protocol)) $(element).removeAttr(attribute);
+        if (!["http:", "https:"].includes(resolved.protocol))
+          $(element).removeAttr(attribute);
         else $(element).attr(attribute, resolved.toString());
-      } catch { $(element).removeAttr(attribute); }
+      } catch {
+        $(element).removeAttr(attribute);
+      }
     }
   });
-  return $.html()?.trim() ?? '';
+  return $.html()?.trim() ?? "";
 }

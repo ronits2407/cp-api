@@ -1,4 +1,4 @@
-import { GlobalConfig, RateLimitConfig, HttpConfig, CacheConfig } from './types';
+import { GlobalConfig, CacheConfig } from "./types";
 
 export type { CacheConfig };
 
@@ -10,35 +10,35 @@ export const defaultConfig: GlobalConfig = {
   },
   rateLimit: {
     enabled: true,
-    strategy: 'token-bucket',
-    onRateLimit: 'wait',
+    strategy: "token-bucket",
+    onRateLimit: "wait",
     maxWaitMs: 30_000,
     platforms: {
-      codeforces: { requestsPerSecond: 1, burst: 5 },
-      atcoder:    { requestsPerSecond: 0.5, burst: 3 },
-      codechef:   { requestsPerSecond: 2, burst: 5 },
-      leetcode:   { requestsPerSecond: 1, burst: 3 },
+      codeforces: { requestsPerSecond: 0.5, burst: 1 },
+      atcoder: { requestsPerSecond: 0.5, burst: 3 },
+      codechef: { requestsPerSecond: 2, burst: 5 },
+      leetcode: { requestsPerSecond: 1, burst: 3 },
     },
   },
   http: {
     timeout: 15_000,
     maxRetries: 3,
     retryDelay: 1_000,
-    userAgent: 'Mozilla/5.0 (compatible; @ronit/cp-api)',
+    userAgent: "Mozilla/5.0 (compatible; @ronits2407/cp-api)",
   },
   events: {
     enabled: false,
   },
   logging: {
     enabled: false,
-    level: 'info',
+    level: "info",
   },
 };
 
 let currentConfig: GlobalConfig = JSON.parse(JSON.stringify(defaultConfig));
 
 /**
- * Configure the global @ronit/cp-api client.
+ * Configure the global CP-API client
  *
  * @example
  * cp.configure({
@@ -59,7 +59,7 @@ export function resetConfig(): void {
   currentConfig = JSON.parse(JSON.stringify(defaultConfig));
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// HELPERS
 
 type DeepPartial<T> = {
   [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
@@ -68,7 +68,11 @@ type DeepPartial<T> = {
 function deepMerge(base: any, override: any): any {
   const result = { ...base };
   for (const key of Object.keys(override ?? {})) {
-    if (override[key] !== null && typeof override[key] === 'object' && !Array.isArray(override[key])) {
+    if (
+      override[key] !== null &&
+      typeof override[key] === "object" &&
+      !Array.isArray(override[key])
+    ) {
       result[key] = deepMerge(base[key] ?? {}, override[key]);
     } else if (override[key] !== undefined) {
       result[key] = override[key];

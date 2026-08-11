@@ -1,11 +1,11 @@
 ﻿/**
  * @file httpClient.ts
- * @description A smart HTTP client wrapping axios for the cp-api package.
+ * @description A smart HTTP client wrapping axios for CP-API
  *
  * Features:
  *  - Configurable timeout, retry count, and retry delay.
  *  - Exponential backoff with jitter on retryable errors (429, 503, network).
- *  - Optional {@link RateLimiter} integration — calls `acquire()` before each request.
+ *  - Optional {@link RateLimiter} integration - calls `acquire()` before each request.
  *  - Custom User-Agent and optional proxy support.
  *  - Full TypeScript generics so callers get typed response bodies.
  */
@@ -15,64 +15,59 @@ import axios, {
   AxiosRequestConfig,
   AxiosError,
   AxiosProxyConfig,
-} from 'axios';
-import { RateLimiter } from './rateLimiter';
+} from "axios";
+import { RateLimiter } from "./rateLimiter";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
+// TYPES
 
-/** Configuration passed to the {@link HttpClient} constructor. */
+/** Configuration passed to the {@link HttpClient} constructor */
 export interface HttpClientConfig {
   /**
-   * Request timeout in milliseconds.
+   * Request timeout in milliseconds
    * @default 30_000
    */
   timeout?: number;
 
   /**
-   * Maximum number of retry attempts for retryable errors.
+   * Maximum number of retry attempts for retryable errors
    * @default 3
    */
   maxRetries?: number;
 
   /**
-   * Base delay in milliseconds before the first retry.
-   * Subsequent retries use exponential backoff + random jitter.
+   * Base delay in milliseconds before the first retry
+   * Subsequent retries use exponential backoff + random jitter
    * @default 500
    */
   retryDelay?: number;
 
   /**
-   * Value to send in the `User-Agent` header.
+   * Value to send in the `User-Agent` header
    * @default 'cp-api/1.0'
    */
   userAgent?: string;
 
   /**
-   * Optional axios-compatible proxy configuration.
+   * Optional axios-compatible proxy configuration
    * @example { host: '127.0.0.1', port: 8080 }
    */
   proxy?: AxiosProxyConfig;
 
   /**
-   * Optional rate limiter to throttle outbound requests.
+   * Optional rate limiter to throttle outbound requests
    * When provided, `acquire()` is called before every request attempt
-   * (including retries).
    */
   rateLimiter?: RateLimiter;
 }
 
-/** HTTP status codes that trigger an automatic retry. */
+/** HTTP status codes that trigger an automatic retry */
 const RETRYABLE_STATUS_CODES = new Set([429, 503]);
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// HELPERS
 
 /**
- * Calculate the delay (ms) for the nth retry attempt using exponential
- * backoff plus a random jitter of 0–500 ms.
+ * Calculate the delay (ms) for the nth retry attempt
+ * Using exponential backoff plus a random jitter of 0–500 ms.
  *
  * Formula: `baseDelay * 2^attempt + random(0, 500)`
  */
@@ -82,7 +77,7 @@ function computeBackoff(baseDelay: number, attempt: number): number {
   return Math.floor(exponential + jitter);
 }
 
-/** Returns true if the AxiosError should be retried. */
+/** Returns true if the AxiosError should be retried */
 function isRetryable(error: AxiosError): boolean {
   // Network-level errors (no response received).
   if (!error.response) {
@@ -91,17 +86,15 @@ function isRetryable(error: AxiosError): boolean {
   return RETRYABLE_STATUS_CODES.has(error.response.status);
 }
 
-/** Pause execution for `ms` milliseconds. */
+/** Pause execution for `ms` milliseconds */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// ---------------------------------------------------------------------------
 // HttpClient
-// ---------------------------------------------------------------------------
 
 /**
- * Smart HTTP client with automatic retry, backoff, and optional rate-limiting.
+ * Smart HTTP client with automatic retry, backoff, and optional rate-limiting
  *
  * @example
  * ```ts
@@ -123,7 +116,7 @@ export class HttpClient {
       timeout = 30_000,
       maxRetries = 3,
       retryDelay = 500,
-      userAgent = 'cp-api/1.0',
+      userAgent = "cp-api/1.0",
       proxy,
       rateLimiter,
     } = config;
@@ -132,23 +125,21 @@ export class HttpClient {
     this.retryDelay = retryDelay;
     this.rateLimiter = rateLimiter;
 
-    // Build a shared axios instance with sensible defaults.
+    // Build a shared axios instance with sensible defaults
     this.axiosInstance = axios.create({
       timeout,
       proxy: proxy ?? undefined,
       headers: {
-        'User-Agent': userAgent,
-        Accept: 'application/json',
+        "User-Agent": userAgent,
+        Accept: "application/json",
       },
     });
   }
 
-  // ---------------------------------------------------------------------------
   // Public Methods
-  // ---------------------------------------------------------------------------
 
   /**
-   * Perform a GET request and return the typed response body.
+   * Perform a GET request and return the typed response body
    *
    * @param url     - Absolute URL to fetch.
    * @param params  - Optional query-string parameters (serialised by axios).
@@ -164,12 +155,22 @@ export class HttpClient {
     url: string,
     params?: Record<string, unknown>,
     headers?: Record<string, string>,
+    options: Omit<
+      AxiosRequestConfig,
+      "method" | "url" | "params" | "headers"
+    > = {},
   ): Promise<T> {
-    return this._request<T>({ method: 'GET', url, params, headers });
+    return this._request<T>({
+      ...options,
+      method: "GET",
+      url,
+      params,
+      headers,
+    });
   }
 
   /**
-   * Perform a POST request and return the typed response body.
+   * Perform a POST request and return the typed response body
    *
    * @param url     - Absolute URL to post to.
    * @param data    - Request body (will be JSON-serialised by axios).
@@ -185,16 +186,18 @@ export class HttpClient {
     url: string,
     data: unknown,
     headers?: Record<string, string>,
+    options: Omit<
+      AxiosRequestConfig,
+      "method" | "url" | "data" | "headers"
+    > = {},
   ): Promise<T> {
-    return this._request<T>({ method: 'POST', url, data, headers });
+    return this._request<T>({ ...options, method: "POST", url, data, headers });
   }
 
-  // ---------------------------------------------------------------------------
-  // Private — core request logic
-  // ---------------------------------------------------------------------------
+  // Private request logic
 
   /**
-   * Internal request dispatcher with retry + backoff logic.
+   * Internal request dispatcher with retry + backoff logic
    *
    * @param config - Axios-compatible request config.
    */
@@ -202,7 +205,7 @@ export class HttpClient {
     let attempt = 0;
 
     while (true) {
-      // Acquire a rate-limiter token before every attempt (including retries).
+      // Acquire a rate-limiter token before every attempt (including retries)
       if (this.rateLimiter) {
         await this.rateLimiter.acquire();
       }
@@ -213,22 +216,22 @@ export class HttpClient {
       } catch (err) {
         const axiosErr = err as AxiosError;
 
-        // Non-retryable errors — bubble up immediately.
+        // Non-retryable errors - bubble up immediately
         if (!axios.isAxiosError(axiosErr) || !isRetryable(axiosErr)) {
           throw axiosErr;
         }
 
-        // We've exhausted our retry budget.
+        // We've exhausted our retry budget
         if (attempt >= this.maxRetries) {
           throw axiosErr;
         }
 
         const delay = computeBackoff(this.retryDelay, attempt);
-        const status = axiosErr.response?.status ?? 'network error';
+        const status = axiosErr.response?.status ?? "network error";
 
         console.warn(
           `[HttpClient] Retryable error (status: ${status}) on ${config.method} ${config.url}. ` +
-          `Attempt ${attempt + 1}/${this.maxRetries}. Retrying in ${delay}ms...`,
+            `Attempt ${attempt + 1}/${this.maxRetries}. Retrying in ${delay}ms...`,
         );
 
         await sleep(delay);

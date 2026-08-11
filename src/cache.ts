@@ -1,12 +1,12 @@
-import { LRUCache } from 'lru-cache';
-import { getConfig } from './config';
+import { LRUCache } from "lru-cache";
+import { getConfig } from "./config";
 
 const _cache = new LRUCache<string, { value: any; expiresAt: number }>({
   max: 500,
 });
 
 /**
- * Fetch with optional LRU cache.
+ * Fetch with optional LRU cache
  * @param key        Unique cache key
  * @param fetcher    Async function that fetches the data
  * @param ttlMs      Override TTL in milliseconds (uses global config default if omitted)
@@ -14,7 +14,7 @@ const _cache = new LRUCache<string, { value: any; expiresAt: number }>({
 export async function cachedFetch<T>(
   key: string,
   fetcher: () => Promise<T>,
-  ttlMs?: number
+  ttlMs?: number,
 ): Promise<T> {
   const config = getConfig();
 

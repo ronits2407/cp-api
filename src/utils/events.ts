@@ -1,6 +1,6 @@
 ﻿/**
  * @file events.ts
- * @description Typed event emitter for the cp-api package.
+ * @description Typed event emitter for the CP-API
  *
  * Provides a strongly-typed wrapper around Node.js EventEmitter so that all
  * internal subsystems (fetcher, cache, rate-limiter) can broadcast lifecycle
@@ -18,11 +18,9 @@
  * ```
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from "events";
 
-// ---------------------------------------------------------------------------
-// Event Payload
-// ---------------------------------------------------------------------------
+// Event PAYLOAD
 
 /**
  * Shared payload shape for all cp-api events.
@@ -31,25 +29,23 @@ import { EventEmitter } from 'events';
  * the data that makes sense for its context.
  */
 export interface CPEventPayload {
-  /** The platform this event is associated with (e.g. `'twitter'`, `'reddit'`). */
+  /** The platform this event is associated with (Eg. `'twitter'`, `'reddit'`) */
   platform: string;
 
-  /** The URL being fetched, if applicable. */
+  /** The URL being fetched, if applicable */
   url?: string;
 
-  /** How long the operation took, in milliseconds, if applicable. */
+  /** How long the operation took, in milliseconds, if applicable */
   durationMs?: number;
 
-  /** The error that occurred, for error events. */
+  /** The error that occurred, for error events */
   error?: Error;
 }
 
-// ---------------------------------------------------------------------------
-// Event Map
-// ---------------------------------------------------------------------------
+// Event MAP
 
 /**
- * Mapping of every event name to its payload type.
+ * Mapping of every event name to its payload type
  *
  * | Event            | When emitted                                         |
  * |------------------|------------------------------------------------------|
@@ -62,34 +58,32 @@ export interface CPEventPayload {
  * | `rateLimit:hit`  | A rate-limit token was granted / consumed.           |
  */
 export interface CPEventMap {
-  'fetch:start': CPEventPayload;
-  'fetch:success': CPEventPayload;
-  'fetch:error': CPEventPayload;
-  'cache:hit': CPEventPayload;
-  'cache:miss': CPEventPayload;
-  'rateLimit:wait': CPEventPayload;
-  'rateLimit:hit': CPEventPayload;
+  "fetch:start": CPEventPayload;
+  "fetch:success": CPEventPayload;
+  "fetch:error": CPEventPayload;
+  "cache:hit": CPEventPayload;
+  "cache:miss": CPEventPayload;
+  "rateLimit:wait": CPEventPayload;
+  "rateLimit:hit": CPEventPayload;
 }
 
-/** Union of all valid cp-api event names. */
+/** Union of all valid cp-api event names */
 export type CPEventName = keyof CPEventMap;
 
-// ---------------------------------------------------------------------------
-// Typed listener type
-// ---------------------------------------------------------------------------
+// Listener TYPE
 
-/** A listener function for a specific event. */
-export type CPEventListener<E extends CPEventName> = (payload: CPEventMap[E]) => void;
+/** A listener function for a specific event */
+export type CPEventListener<E extends CPEventName> = (
+  payload: CPEventMap[E],
+) => void;
 
-// ---------------------------------------------------------------------------
-// Singleton EventEmitter
-// ---------------------------------------------------------------------------
+// EventEmitter SINGLETON
 
 /**
- * The package-level singleton event emitter.
+ * The package-level singleton event emitter
  *
- * All cp-api subsystems emit to this instance. Consumers can subscribe via
- * the {@link onEvent} helper or directly via `cpEvents.on(event, listener)`.
+ * All CP-API subsystems emit to this instance.
+ * Consumers can subscribe via the {@link onEvent} helper or directly via `cpEvents.on(event, listener)`.
  *
  * @remarks
  * The default maximum listener count is raised to 50 to accommodate
@@ -99,12 +93,10 @@ export type CPEventListener<E extends CPEventName> = (payload: CPEventMap[E]) =>
 export const cpEvents: EventEmitter = new EventEmitter();
 cpEvents.setMaxListeners(50);
 
-// ---------------------------------------------------------------------------
-// Typed helper functions
-// ---------------------------------------------------------------------------
+// HELPERS
 
 /**
- * Subscribe to a cp-api event.
+ * Subscribe to a CP-API event
  *
  * @param event    - The event name (must be a key of {@link CPEventMap}).
  * @param listener - Callback invoked with the typed event payload.
@@ -126,7 +118,7 @@ export function onEvent<E extends CPEventName>(
 }
 
 /**
- * Unsubscribe a previously registered listener from a cp-api event.
+ * Unsubscribe a previously registered listener from a CP-API event
  *
  * @param event    - The event name to unsubscribe from.
  * @param listener - The exact same function reference passed to {@link onEvent}.
@@ -147,7 +139,7 @@ export function offEvent<E extends CPEventName>(
 }
 
 /**
- * Emit a cp-api event with a typed payload.
+ * Emit a CP-API event with a typed payload
  *
  * @param event   - The event name to emit.
  * @param payload - The typed data to deliver to all registered listeners.
