@@ -91,7 +91,8 @@ function positive(value: number, name: string): void {
 
 function validateConfig(config: GlobalConfig): void {
   positive(config.cache.ttlMs, "cache.ttlMs");
-  positive(config.cache.maxSize, "cache.maxSize");
+  if (config.cache.maxSize !== undefined)
+    positive(config.cache.maxSize, "cache.maxSize");
   positive(config.http.timeout, "http.timeout");
   if (!Number.isInteger(config.http.maxRetries) || config.http.maxRetries < 0)
     throw new TypeError("http.maxRetries must be a non-negative integer");

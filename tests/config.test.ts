@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { configure, getConfig, resetConfig } from "../src/config";
+import type { CacheConfig } from "../src/types";
 
 describe("Configuration", () => {
   beforeEach(() => {
@@ -12,6 +13,7 @@ describe("Configuration", () => {
     expect(config.http.maxRetries).toBe(3);
     expect(config.cache.enabled).toBe(true);
     expect(config.cache.ttlMs).toBe(5 * 60 * 1000);
+    expect(config.cache.maxSize).toBe(500);
     expect(config.rateLimit.enabled).toBe(true);
     expect(config.rateLimit.strategy).toBe("token-bucket");
     expect(config.rateLimit.onRateLimit).toBe("wait");
@@ -21,6 +23,12 @@ describe("Configuration", () => {
     });
     expect(config.logging.enabled).toBe(false);
     expect(config.events.enabled).toBe(false);
+  });
+
+  it("keeps maxSize optional for source compatibility", () => {
+    const cache: CacheConfig = { enabled: true, ttlMs: 1_000 };
+    configure({ cache });
+    expect(getConfig().cache.maxSize).toBe(500);
   });
 
   it("should deep-merge partial updates", () => {

@@ -37,6 +37,8 @@ export function assertProblemPageAccessible(
   html: string,
   platform: ProblemContentPlatform,
 ): void {
+  // Keep these signatures aligned with the challenge pages returned by
+  // Cloudflare and the supported platforms when their markup changes.
   if (
     /<title>\s*(just a moment|attention required)/i.test(html) ||
     /cf-chl-|challenge-platform|verify you are human/i.test(html)

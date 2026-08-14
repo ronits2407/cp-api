@@ -13,16 +13,30 @@ export type { HealthPlatform, HealthResult } from "../types";
 /** Maximum time (ms) to wait for any single platform health check */
 const HEALTH_TIMEOUT_MS = 8_000;
 
+type HealthClientEntry = { signature: string; client: HttpClient };
+const healthClients = new Map<string, HealthClientEntry>();
+
 function healthClient(platform: string): HttpClient {
   const http = getConfig().http;
-  return new HttpClient({
+  const options = {
     platform,
     timeout: Math.min(http.timeout, HEALTH_TIMEOUT_MS),
     maxRetries: 0,
     retryDelay: http.retryDelay,
     userAgent: http.userAgent,
     proxy: parseProxy(http.proxy),
-  });
+  };
+  const signature = JSON.stringify(options);
+  const existing = healthClients.get(platform);
+  if (existing?.signature === signature) return existing.client;
+  const client = new HttpClient(options);
+  healthClients.set(platform, { signature, client });
+  return client;
+}
+
+/** Clear cached health clients @internal */
+export function resetHealthClients(): void {
+  healthClients.clear();
 }
 
 // PER-PLATFORM CHECK

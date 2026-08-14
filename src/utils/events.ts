@@ -47,6 +47,15 @@ export interface CPEventPayload {
   waitedMs?: number;
 }
 
+/** Emitted immediately before a failed request is retried */
+export interface FetchRetryEventPayload extends CPEventPayload {
+  url: string;
+  /** The 0-based attempt number that will be dispatched next */
+  attempt: number;
+  delayMs: number;
+  error: Error;
+}
+
 // Event MAP
 
 /**
@@ -55,6 +64,7 @@ export interface CPEventPayload {
  * | Event            | When emitted                                         |
  * |------------------|------------------------------------------------------|
  * | `fetch:start`    | A network request is about to be dispatched.         |
+ * | `fetch:retry`    | A retry is scheduled after a retryable failure.      |
  * | `fetch:success`  | A network request completed successfully.            |
  * | `fetch:error`    | A network request failed (after all retries).        |
  * | `cache:hit`      | A cached value was returned without a network call.  |
@@ -64,6 +74,7 @@ export interface CPEventPayload {
  */
 export interface CPEventMap {
   "fetch:start": CPEventPayload;
+  "fetch:retry": FetchRetryEventPayload;
   "fetch:success": CPEventPayload;
   "fetch:error": CPEventPayload;
   "cache:hit": CPEventPayload;

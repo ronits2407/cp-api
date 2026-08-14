@@ -4,8 +4,9 @@ import { clearCache } from "../src/cache";
 import { configure, resetConfig } from "../src/config";
 import { CodeChef } from "../src/platforms/codechef";
 import { LeetCode } from "../src/platforms/leetcode";
-import { Health } from "../src/unified/health";
+import { Health, resetHealthClients } from "../src/unified/health";
 import { HttpClient } from "../src/utils/httpClient";
+import { offEvent, onEvent, type CPEventPayload } from "../src/utils/events";
 import {
   getPlatformHttpClient,
   resetPlatformHttpClients,
@@ -27,6 +28,7 @@ async function listen(
 
 beforeEach(() => {
   resetPlatformHttpClients();
+  resetHealthClients();
   resetConfig();
   clearCache();
 });
@@ -34,6 +36,7 @@ beforeEach(() => {
 afterEach(async () => {
   vi.restoreAllMocks();
   resetPlatformHttpClients();
+  resetHealthClients();
   if (server)
     await new Promise<void>((resolve, reject) =>
       server!.close((error) => (error ? reject(error) : resolve())),
@@ -93,6 +96,60 @@ describe("platform HTTP clients", () => {
       getPlatformHttpClient("atcoder").get(`${origin}/retry`),
     ).resolves.toEqual({ ok: true });
     expect(requests).toBe(2);
+  });
+
+  it("emits one logical start and a typed event for each retry", async () => {
+    let requests = 0;
+    const origin = await listen((_request, response) => {
+      requests++;
+      if (requests === 1) {
+        response.statusCode = 503;
+        response.end("busy");
+        return;
+      }
+      response.setHeader("Content-Type", "application/json");
+      response.end('{"ok":true}');
+    });
+    configure({
+      events: { enabled: true },
+      rateLimit: { enabled: false },
+      http: { maxRetries: 1, retryDelay: 0 },
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const starts: CPEventPayload[] = [];
+    const retries: CPEventPayload[] = [];
+    const successes: CPEventPayload[] = [];
+    const onStart = (event: CPEventPayload) => starts.push(event);
+    const onRetry = (event: CPEventPayload) => retries.push(event);
+    const onSuccess = (event: CPEventPayload) => successes.push(event);
+    onEvent("fetch:start", onStart);
+    onEvent("fetch:retry", onRetry);
+    onEvent("fetch:success", onSuccess);
+
+    try {
+      await new HttpClient({
+        platform: "atcoder",
+        maxRetries: 1,
+        retryDelay: 0,
+      }).get(`${origin}/events`);
+    } finally {
+      offEvent("fetch:start", onStart);
+      offEvent("fetch:retry", onRetry);
+      offEvent("fetch:success", onSuccess);
+    }
+
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toMatchObject({ platform: "atcoder", attempt: 0 });
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({
+      platform: "atcoder",
+      url: `${origin}/events`,
+      attempt: 1,
+      delayMs: 0,
+      error: expect.any(Error),
+    });
+    expect(successes).toHaveLength(1);
+    expect(successes[0]).toMatchObject({ attempt: 1 });
   });
 
   it("routes CodeChef API calls through the shared client", async () => {
@@ -165,6 +222,27 @@ describe("platform HTTP clients", () => {
       { "Cache-Control": "no-cache" },
       { timeout: 8_000 },
     );
+  });
+
+  it("reuses health clients until effective HTTP configuration changes", async () => {
+    const instances: HttpClient[] = [];
+    vi.spyOn(HttpClient.prototype, "get").mockImplementation(function () {
+      instances.push(this);
+      return Promise.resolve({ status: "success" });
+    });
+    const health = new Health();
+
+    await health.check("CODECHEF");
+    await health.check("CODECHEF");
+    expect(instances[1]).toBe(instances[0]);
+
+    configure({ http: { proxy: "http://localhost:8080" } });
+    await health.check("CODECHEF");
+    expect(instances[2]).not.toBe(instances[1]);
+
+    configure({ http: { userAgent: "cp-api-health-test" } });
+    await health.check("CODECHEF");
+    expect(instances[3]).not.toBe(instances[2]);
   });
 
   it("routes the LeetCode health probe through the shared client", async () => {

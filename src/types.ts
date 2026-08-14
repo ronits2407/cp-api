@@ -80,7 +80,7 @@ export interface CacheConfig {
   /** Default TTL for cached items in ms (default: 300000 = 5 min) */
   ttlMs: number;
   /** Max number of items in the LRU cache (default: 500) */
-  maxSize: number;
+  maxSize?: number;
 }
 
 // Events & Logging

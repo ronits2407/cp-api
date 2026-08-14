@@ -301,7 +301,10 @@ export class AtCoder {
       }
       if (page.length < AC_SUBMISSIONS_PAGE_SIZE) break;
       const next =
-        Math.max(...page.map((submission) => submission.epoch_second)) + 1;
+        page.reduce(
+          (highest, submission) => Math.max(highest, submission.epoch_second),
+          cursor,
+        ) + 1;
       if (next <= cursor)
         throw new Error("AtCoder submissions pagination did not advance");
       cursor = next;

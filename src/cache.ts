@@ -16,11 +16,12 @@ function platformFromKey(key: string): string {
 }
 
 function syncCapacity(): void {
-  const max = getConfig().cache.maxSize;
+  const max = getConfig().cache.maxSize ?? 500;
   if (max === configuredMax) return;
+  const entries = cache.dump();
   configuredMax = max;
   cache = new LRUCache<string, any>({ max });
-  pending.clear();
+  cache.load(entries);
 }
 
 export async function cachedFetch<T>(

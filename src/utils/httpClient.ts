@@ -287,6 +287,13 @@ export class HttpClient {
           maxRetries: this.maxRetries,
           delayMs: delay,
         });
+        emitEvent("fetch:retry", {
+          platform: this.platform,
+          url,
+          attempt: attempt + 1,
+          delayMs: delay,
+          error: axiosErr,
+        });
 
         await sleep(delay);
         attempt++;

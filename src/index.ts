@@ -75,6 +75,7 @@ export type {
   CPEventMap,
   CPEventName,
   CPEventPayload,
+  FetchRetryEventPayload,
 } from "./utils/events";
 import { resetPlatformHttpClients } from "./utils/platformHttpClient";
 
