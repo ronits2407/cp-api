@@ -24,6 +24,9 @@ export interface ProblemContent {
   sourceUrl: string;
 }
 
+/** Fetch the HTML document for a public problem URL */
+export type ProblemContentFetcher = (url: string) => Promise<string>;
+
 export class ProblemContentAccessError extends Error {
   constructor(public readonly platform: ProblemContentPlatform) {
     super(
@@ -41,7 +44,7 @@ export function assertProblemPageAccessible(
   // Cloudflare and the supported platforms when their markup changes.
   if (
     /<title>\s*(just a moment|attention required)/i.test(html) ||
-    /cf-chl-|challenge-platform|verify you are human/i.test(html)
+    /cf-chl-|verify you are human/i.test(html)
   )
     throw new ProblemContentAccessError(platform);
 }
